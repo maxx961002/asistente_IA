@@ -1,5 +1,5 @@
 .idea/
 .venv/
 .pycache/
-.env/
-.data/
+.env
+data/
