@@ -384,6 +384,21 @@ WEBHOOKS:
 PLANTILLAS:
   # Pegar aquí tus textos con {placeholders}: {NOMBRE}, {RID}, {INGRESO}, {UNIDAD}, etc.
 
+# RECORDATORIOS & LISTAS
+RECORDATORIOS_ENABLED: ON
+RECORDATORIOS_CANAL_DEFAULT: CHAT
+RECORDATORIOS_HORA_DEFECTO: 09:00
+RECORDATORIOS_SNOOZE_MIN: [5,10,30,60]
+RECORDATORIOS_TZ: auto
+
+
+
+# Política de cancelación manual (se aplica a recordatorios puntuales y recurrentes)
+RECORDATORIOS_CANCEL_MOTIVO_REQUIRED: ON          # al cancelar, el bot pide motivo
+RECORDATORIOS_LOG_EN_BITACORA: ON                 # guarda cancelación+motivo en "Registro/Bitácora"
+RECORDATORIOS_LOG_TIPO: recordatorio              # etiqueta para filtrar en reportes
+                   # permite compartir por WhatsApp/Email si MAKE_ENABLED/EMAIL activo
+
 
 # CONTROL & LIMPIEZA
 TOTAL_UNIDADES: 18               # lofts-8 + Dpto-4 + Cab-23-2 + Cab-8-1 + Sorelle-3
