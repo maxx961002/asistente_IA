@@ -4,11 +4,23 @@ Lectura en voz alta (read-back): antes de ejecutar algo que impacta precio, unid
 
 Relleno de slots: si faltan datos, pregunta; si hay defaults en CONFIGURACION.md, los usa y lo avisa.
 
-Identificación de cliente: si das solo nombre, intenta matchear con DNI/Tel/Nombre; si hay dudas, propone candidatos y pide DNI o Tel.
+Identificación de cliente (prioridad): DNI exacto > Tel normalizado (PHONE_REGION) > Nombre+Localidad > Nombre (si hay dudas, propone candidatos y pide DNI o Tel).
 
-Estados de reserva: Pendiente → Confirmado → (Reprogramar) → Cancelado.
+Estados de reserva: PendienteDatos → Pendiente → Confirmado → (Reprogramar) → Cancelado.
+
+Flags de reserva:
+
+datos_completos: ON/OFF
+
+cliente_vinculado: ON/OFF
+
+sugerencias_cliente: [] (candidatos por DNI/Tel/Nombre)
 
 Asignación de unidad: usa MAPA Tipo→Unidades y reglas de OVERFLOW; respeta contenidos/amenidades (p. ej., camas separadas) si fueron solicitadas.
+
+Fechas naturales que entiende: “este viernes”, “el finde”, “del 24 al 26”, “2 noches” (si decís noches, el egreso = ingreso + noches).
+
+Bitácora: todo cambio relevante registra quién/cuándo y antes→después (y motivo si corresponde).
 
 1) crear_reserva
 
@@ -20,98 +32,252 @@ Frases típicas
 
 “Reservá Departamento 4–5p para María Gómez, 20–23/09, 4 pax, camas separadas.”
 
+“Reservá para Juan Topo, tel +54 9 3564…, este viernes, 2 noches, 2 personas.”
+
 Slots
 
-Requeridos: nombre_huesped, ingreso, egreso, personas.
+Requeridos: nombre_huesped/cliente, ingreso, egreso (o noches), personas.
 
-Opcionales: tipo_solicitado, preferencias (ej. camas separadas), servicios (ej. desayuno normal/sin TACC), seña_monto, seña_medio, tel, dni, localidad, late_checkout.
+Opcionales: tipo_solicitado, preferencias (camas separadas), servicios (desayuno normal/sin TACC), seña_monto, seña_medio, tel, dni, localidad, late_checkout.
 
 Derivados: RID, unidad_asignada (o “Sin asignar”), resto.
 
 Modo Rápido (express)
 
-Si no decís tipo, se infiere por personas (ej.: 2 pax → “Loft 2 personas”), valida contra el MAPA.
+Si no decís tipo, se infiere por personas (ej.: 2 pax → “Loft 2 personas”) y se valida contra el MAPA.
 
-Unidad: autoasigna una libre del tipo; si no hay, intenta OVERFLOW permitido.
+Unidad: autoasigna una libre; si no hay, intenta OVERFLOW permitido.
 
-Servicios por defecto (La Yema): servicio_1 = Desayuno a $0 → asume normales = personas, sin_tacc = 0 (editable luego).
-
-Preferencias: ninguna (salvo que la pidas).
+Servicios (La Yema): servicio_1 = Desayuno a $0 → normales = personas, sin_tacc = 0 (editable luego).
 
 Seña: si no informás, queda sin seña; Resto = total.
 
-Cliente: busca por nombre; si no existe, pide DNI o Tel y crea ficha mínima (Nombre, DNI, Tel, Localidad).
+Cliente: busca por DNI/Tel/Nombre+Localidad; si no existe, pide DNI o Tel y crea ficha mínima.
 
 Read-back:
-“Voy a crear: {NOMBRE}, {INGRESO–EGRESO}, {PAX}, {TIPO}, Unidad: auto, Desayuno {normales} normal. Resto = $X. ¿Confirmo así rápido o querés completar (seña, preferencias, otra unidad/servicio)?”
+“Voy a crear: {NOMBRE}, {INGRESO–EGRESO}, {PAX}, {TIPO}, Unidad: auto, Desayuno {normales} normal. Resto = $X. ¿Confirmo rápido o querés completar (seña, preferencias, otra unidad/servicio)?”
 
 Modo Completo
 
-Tras el read-back, ofrece completar: tipo, unidad, preferencias, servicios (reparto normal/sin TACC), seña (monto/medio), mensajes (si MAKE_ENABLED: ON).
+Tras el read-back, permite ajustar tipo, unidad, amenidades, servicios (normal/sin TACC), seña y (si MAKE_ENABLED: ON) mensajes.
 
 Validaciones
 
-Egreso > Ingreso, capacidad tipo/unidad, choques de calendario, compatibilidad de amenidades (p. ej., camas separadas), OVERFLOW que respeta amenidades si fueron pedidas.
+Egreso > Ingreso, capacidad tipo/unidad, choques de calendario, compatibilidad de amenidades, OVERFLOW respetando amenidades.
 
-2) abrir_reserva
+Si el usuario no aporta DNI/Tel en el momento, sugerir crear_reserva_rapida: deja la reserva en PendienteDatos y programa un recordatorio para completar.
 
-Frases: “Abrí la ficha de María Gómez / DNI 34.567.890 / RID YEM-20240920-001.”
-Slots: identificador (nombre+DNI/fecha, DNI/Tel, o RID).
+2) crear_reserva_rapida
 
-3) cambiar_unidad
+Qué hace: Crea reserva con mínimos (nombre, ingreso, egreso/noches, personas).
 
-Frases: “En la reserva de María, pasá a unidad_7.” / “Movela a Loft 5.”
-Slots: reserva_id, nueva_unidad.
-Notas: verifica disponibilidad/amenidades; read-back y confirma; actualiza calendario.
+Frases
 
-4) editar_datos_huesped
+“Agendá rápido a Juan Pablo del 24/08 al 26/08 2 pax.”
 
-Frases: “Actualizá el teléfono de María a +54 9 11 2222-3333.”
-Slots: reserva_id o cliente_id, campo, nuevo_valor.
-Reglas: DNI/Tel requieren confirmación adicional.
+Flujo
 
-5) agregar_servicio / quitar_servicio
+Genera RID, asigna tipo por pax y unidad auto (respeta overflow), setea servicios por defecto.
 
-Frases: “Sumá Desayuno: 1 sin TACC y 1 normal a Juan Pablo.” / “Quitá el desayuno de María.”
-Slots: reserva_id, servicio_key/nombre, personas_por_subtipo.
-Notas (La Yema): precio al huésped $0; se computa costo proveedor ($2000 normal, $2500 sin TACC).
+Estado = PendienteDatos, datos_completos=OFF.
 
-6) set_preferencia / quitar_preferencia
+Crea recordatorio “Completar datos de {RID} ({nombre})” para hoy (hora por defecto).
 
-Frases: “Agregá camas separadas a Juan.” / “Sacá camas separadas.”
-Notas: si la unidad actual no admite, sugiere cambio de unidad compatible (respeta OVERFLOW).
+Read-back: “Quedó cargado {nombre}, {fechas}, {pax}, tipo auto. Estado Pendiente de completar. ¿Confirmo recordatorio?”
 
-7) confirmar_reserva / cancelar_reserva / reprogramar_reserva
+3) completar_reserva
 
-confirmar_reserva: crea/actualiza evento en CALENDAR_ID y dispara mensajes si están activos.
+Qué hace: Completa datos mínimos y vincula con un cliente existente si hay match.
 
-cancelar_reserva: libera calendario; puede pedir motivo (guarda en bitácora).
+Frases
 
-reprogramar_reserva: cambia fechas; mantiene pax/servicios/preferencias; valida disponibilidad.
+“Completá {RID}: DNI 34…, Tel +54…, Localidad Tigre.”
 
-Frases: “Confirmá / Cancelá / Reprogramá la reserva de María al 22/09.”
+Match (prioridad)
 
-8) abrir_unidad / estado_unidad / set_activa
+DNI exacto → match seguro (propone vincular).
 
-Frases: “Mostrame unidad_1 / Loft-1.” · “Poné Loft-1 en REPARACION (nota: cambiar mixer).” · “Marcala ACTIVA.”
-Efectos: bloqueos operativos, exclusión de sugerencias, recordatorios para volver a ACTIVA si querés.
+Tel normalizado → si 1 match, propone; si varios (familia), lista candidatos.
 
-9) preguntar_disponibilidad
+Nombre+Localidad → exacto o fuzzy → lista si hay más de 1.
 
-Frases: “¿Qué Loft 2p hay libres para 12–14/10?”
-Salida: lista priorizada; excluye mantenimiento/limpieza; si no hay, propone OVERFLOW.
+Sin match → crea Cliente nuevo.
 
-10) tareas_hoy / marcar_limpia
+Al confirmar
 
-Frases: “¿Cuántas unidades hay que limpiar hoy y cuáles?” · “Marcá Loft-1 como lista (ACTIVA).”
-Efecto: checkout → LIMPIEZA + tarea en HOUSEKEEPING_CALENDAR_ID; “lista” → ACTIVA.
+cliente_vinculado=ON, datos_completos=ON, sale de PendienteDatos.
 
-11) ver_calendario
+Actualiza descripción del evento (DNI/Tel/Localidad).
 
-Frases: “Mostrame el calendario del finde / semana que viene.”
-Salida: eventos de check-in/out + (si aplica) servicios/housekeeping.
+Bitácora: match_cliente (criterio, resultado, ids).
 
-12) Reportes
+4) resolver_homonimia
+
+Qué hace: Muestra candidatos cuando hay muchos con el mismo nombre.
+
+Frases
+
+“Resolver homonimia Juan Pablo.”
+
+Salida
+
+Lista con DNI / Tel / Localidad / Veces (última visita); elegís 1.
+
+5) vincular_a_cliente
+
+Qué hace: Vincula esta reserva a un ClienteID/DNI específico.
+
+Frases
+
+“Vinculá esta reserva a DNI 34… / ClienteID cli_….”
+
+6) (admin) fusionar_clientes
+
+Qué hace: Fusiona Cliente A → Cliente B (conserva B; mueve historial).
+
+Frases
+
+“Fusioná ClienteID A en ClienteID B. Conservar B.”
+
+7) abrir_reserva
+
+Frases
+
+“Abrí la ficha de María Gómez / DNI 34.567.890 / RID YEM-20240920-001.”
+
+Slots
+
+identificador (nombre+DNI/fecha, DNI/Tel, o RID).
+
+8) cambiar_unidad (por nombre visible)
+
+Frases
+
+“En la reserva de María, pasá a Depto A.”
+
+“Movela a Cabaña G.”
+
+“Cambiá a Loft 5.”
+
+(fallback) “Pasá a unidad_7.”
+
+Cómo identifica la unidad (prioridad)
+
+Nombre visible (normaliza acentos, guiones, espacios y may/min).
+
+Aliases (si definís en config).
+
+Patrón Tipo+número/letra: “loft 5”, “cabaña g”, “departamento b”.
+
+UnidadID (unidad_#).
+
+Flujo
+
+Resuelve la unidad → valida disponibilidad y amenidades → read-back:
+“Mover a {Nombre} ({UnidadID}, {Tipo}). ¿Confirmo?”
+
+Si no disponible, sugiere alternativas del mismo tipo (y OVERFLOW si corresponde).
+
+Si la amenidad solicitada no aplica en destino, ofrece:
+a) otra unidad compatible, o b) quitar la amenidad.
+
+Al confirmar: mueve/actualiza evento, recalcula si cambia tarifa, y registra en bitácora.
+
+9) editar_datos_huesped
+
+Frases
+
+“Actualizá el teléfono de María a +54 9 11 2222-3333.”
+
+Slots
+
+reserva_id o cliente_id, campo, nuevo_valor.
+
+Reglas
+
+Cambios en DNI/Tel piden confirmación extra.
+
+Sincroniza con la ficha Cliente y ajusta descripción en eventos futuros.
+
+10) agregar_servicio / quitar_servicio
+
+Frases
+
+“Sumá Desayuno: 1 sin TACC y 1 normal a Juan Pablo.”
+
+“Quitá el desayuno de María.”
+
+Notas (La Yema)
+
+Precio al huésped $0; se computa costo proveedor ($2000 normal, $2500 sin TACC).
+
+11) set_preferencia / quitar_preferencia
+
+Frases
+
+“Agregá camas separadas a Juan.” / “Sacá camas separadas.”
+
+Notas
+
+Si la unidad actual no admite, sugiere cambio a una compatible (respeta OVERFLOW).
+
+12) confirmar_reserva / cancelar_reserva / reprogramar_reserva
+
+confirmar_reserva → crea/actualiza evento en CALENDAR_ID y dispara mensajes si están activos.
+cancelar_reserva → libera evento; pide motivo (bitácora).
+reprogramar_reserva → cambia fechas; mantiene pax/servicios/preferencias; valida disponibilidad.
+
+Frases
+
+“Confirmá / Cancelá / Reprogramá la reserva de María al 22/09.”
+
+13) abrir_unidad / estado_unidad / set_activa
+
+Frases
+
+“Mostrame Depto A / Cabaña G / Loft 5.” · (fallback) “Mostrame unidad_1.”
+
+“Poné Loft 1 en REPARACION (nota: ‘cambiar mixer’).”
+
+“Marcala ACTIVA.”
+
+Efectos
+
+Bloqueos operativos, exclusión de sugerencias, recordatorios para volver a ACTIVA si querés.
+
+14) preguntar_disponibilidad
+
+Frases
+
+“¿Qué Loft 2p hay libres para 12–14/10?”
+
+Salida
+
+Lista priorizada; excluye mantenimiento/limpieza; si no hay, propone OVERFLOW.
+
+15) tareas_hoy / marcar_limpia
+
+Frases
+
+“¿Cuántas unidades hay que limpiar hoy y cuáles?”
+
+“Marcá Loft 1 como lista (ACTIVA).”
+
+Efecto
+
+Checkout → LIMPIEZA + tarea (housekeeping); “lista” → ACTIVA.
+
+16) ver_calendario
+
+Frases
+
+“Mostrame el calendario del finde / semana que viene.”
+
+Salida
+
+Eventos de check-in/out + (si aplica) servicios/housekeeping.
+
+17) Reportes
 
 ingresos_mes: “Ingresos de septiembre.”
 
@@ -120,6 +286,20 @@ costo_proveedor: “Gasto en Desayunos esta semana.”
 ocupacion: “Ocupación del mes y esta semana.”
 
 mejores_clientes: “Top 10 clientes por estadías en 12 meses.”
+
+18) buscar_cliente (consulta directa)
+
+Frases
+
+“Buscá Juan Carrizo de Marull.”
+
+“Buscá por dni 34….”
+
+“Buscá por tel +54 9 3564….”
+
+Salida
+
+Ficha directa o lista de candidatos (Nombre, DNI, Tel, Localidad, Veces/last_seen) para elegir 1.
 
 Frases sinónimas (atajos)
 
@@ -135,11 +315,13 @@ cancelar: “cancelá”, “dalo de baja”.
 
 marcar_limpia: “dejala lista”, “marcala activa”.
 
+buscar_cliente: “buscá”, “encontrá”, “mostrá cliente”.
+
 Defaults del Modo Rápido
 
 Tipo inferido por personas (valida con MAPA).
 
-Unidad autoasignada; si pediste amenidad (p. ej., camas separadas), filtra solo unidades que la tengan; si no hay, aplica OVERFLOW compatible.
+Unidad autoasignada; si pediste amenidad, filtra solo unidades que la tengan; si no hay, aplica OVERFLOW compatible.
 
 Servicios (La Yema): Desayuno $0 → normales = pax, sin_tacc = 0.
 
@@ -152,3 +334,5 @@ Recordatorio de verificación: si usaste Modo Rápido, crea “Verificar datos r
 Validaciones & salvavidas
 
 Fechas válidas; capacidad min/max; choques de calendario; compatibilidad de amenidades; OVERFLOW que respeta amenidades; duplicados de huésped (desambiguación por DNI/Tel).
+
+
