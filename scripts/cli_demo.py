@@ -20,6 +20,30 @@ CAL_RES  = os.path.join(CAL_DIR, "sim_reservas.txt")
 CAL_PROV = os.path.join(CAL_DIR, "sim_proveedor.txt")
 BITACORA = os.path.join(LOG_DIR,  "bitacora.csv")
 
+# --- Bitácora (CSV) ---
+import csv, json
+from datetime import datetime
+
+LOGS_DIR = os.path.join(DATA_DIR, "logs")
+BITACORA = os.path.join(LOGS_DIR, "bitacora.csv")
+
+def log_bitacora(origen, accion, objeto, objeto_id, before, after, extra):
+    os.makedirs(LOGS_DIR, exist_ok=True)
+    new_file = not os.path.exists(BITACORA)
+    with open(BITACORA, "a", encoding="utf-8", newline="") as fh:
+        w = csv.writer(fh)
+        if new_file:
+            w.writerow(["timestamp","origen","accion","objeto","objeto_id","before","after","extra"])
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        def _s(x):
+            if isinstance(x, (dict, list)):
+                return json.dumps(x, ensure_ascii=False)
+            return x if x is not None else ""
+
+        w.writerow([ts, origen, accion, objeto, objeto_id, _s(before), _s(after), _s(extra)])
+
+
 # ---------- Helpers ----------
 def ensure_dirs():
     for d in [DATA_DIR, STATE_DIR, LOG_DIR, CAL_DIR]:
@@ -41,6 +65,24 @@ def ensure_dirs():
     if not os.path.exists(CAL_PROV):
         with open(CAL_PROV, "w", encoding="utf-8") as fh:
             fh.write("# Simulador de calendario de proveedores\n")
+
+TAREAS = os.path.join(DATA_DIR, "state", "tareas.json")
+
+def load_tareas():
+    if not os.path.exists(TAREAS): return []
+    with open(TAREAS, "r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+def save_tareas(ts):
+    with open(TAREAS, "w", encoding="utf-8") as fh:
+        json.dump(ts, fh, ensure_ascii=False, indent=2)
+
+def next_tarea_id(ts):
+    # R-0001, R-0002...
+    nums = [int(t["id"].split("-")[1]) for t in ts if t.get("id","").startswith("R-")]
+    n = max(nums) + 1 if nums else 1
+    return f"R-{n:04d}"
+
 
 def load_json(path):
     with open(path, "r", encoding="utf-8") as fh:
@@ -515,6 +557,118 @@ def cmd_quitar_servicio(args):
     log("quitar_servicio", "reserva", r["rid"], antes=antes, despues=r, nota=f"key={args.key}")
     print("OK: Servicio quitado.")
     return 0
+def cmd_agendar_recordatorio(args):
+    ts = load_tareas()
+    rid = next_tarea_id(ts)
+    ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Modo: uno / diario / semanal
+    if args.cuando:
+        fecha_hora = args.cuando  # "YYYY-MM-DD HH:MM"
+        programacion = {"modo": "uno", "fecha_hora": fecha_hora}
+    elif args.diario:
+        programacion = {"modo": "diario", "hora": args.diario}  # "HH:MM"
+    elif args.semanal and args.hora:
+        dias = [d.strip().upper() for d in args.semanal.split(",")]  # LU,MA,MI,JU,VI,SA,DO
+        programacion = {"modo": "semanal", "hora": args.hora, "dias": dias}
+    else:
+        print("Faltan datos de programación: usa --cuando 'YYYY-MM-DD HH:MM' o --diario 'HH:MM' o --semanal 'LU,MI' --hora 'HH:MM'")
+        return 1
+
+    tarea = {
+        "id": rid,
+        "tipo": "GENERAL",
+        "titulo": args.titulo,
+        "estado": "pendiente",        # pendiente | completado | cancelado
+        "programacion": programacion,
+        "nota": args.nota or "",
+        "creado_en": ahora,
+        "completado_en": None,
+        "cancelado_motivo": None,
+        "origen": "cli"
+    }
+    ts.append(tarea)
+    save_tareas(ts)
+    log_bitacora("cli", "agendar_recordatorio", "tarea", rid, "", tarea, "")
+    print(f"OK · creado {rid}: {tarea['titulo']} · prog={programacion}")
+    return 0
+
+def cmd_listar_recordatorios(args):
+    ts = load_tareas()
+    if not ts:
+        print("No hay tareas/recordatorios.")
+        return 0
+
+    estado_filtro = args.estado.upper() if args.estado else None
+    tipo_filtro = args.tipo.upper() if getattr(args, "tipo", None) else None
+    hoy = datetime.now().strftime("%Y-%m-%d")
+    dow = ["LU","MA","MI","JU","VI","SA","DO"][datetime.now().weekday()]
+
+    def es_de_hoy(t):
+        # GENERAL: por programación; LIMPIEZA: por fecha exacta
+        if t.get("tipo") == "GENERAL":
+            p = t.get("programacion", {})
+            if p.get("modo") == "uno":
+                return str(p.get("fecha_hora", "")).startswith(hoy)
+            if p.get("modo") == "diario":
+                return True
+            if p.get("modo") == "semanal":
+                return dow in (p.get("dias") or [])
+            return False
+        # LIMPIEZA u otros: si tienen fecha exacta para hoy
+        return t.get("fecha") == hoy
+
+    def pasa_filtros(t):
+        if estado_filtro and t.get("estado","").upper() != estado_filtro:
+            return False
+        if tipo_filtro and t.get("tipo","").upper() != tipo_filtro:
+            return False
+        if args.hoy and not es_de_hoy(t):
+            return False
+        return True
+
+    filtradas = [t for t in ts if pasa_filtros(t)]
+    if not filtradas:
+        print("No hay recordatorios para ese filtro.")
+        return 0
+
+    print(f"Recordatorios/Tareas ({len(filtradas)}):")
+    for t in filtradas:
+        tipo = t.get("tipo","-")
+        tid = t.get("id") or f"LIMP-{t.get('unidad_id','?')}"
+        titulo = t.get("titulo") or f"LIMPIEZA {t.get('unidad_nombre','')}".strip() or "Tarea"
+        prog = t.get("programacion", "-") if tipo == "GENERAL" else {"modo":"uno", "fecha": t.get("fecha","-")}
+        nota = t.get("nota","-")
+        estado = t.get("estado","-")
+        print(f" - {tid} | {estado} | {tipo} | {titulo} | prog={prog} | nota={nota}")
+    return 0
+
+
+def cmd_completar_recordatorio(args):
+    ts = load_tareas()
+    for t in ts:
+        if t["id"] == args.id and t["estado"] == "pendiente":
+            t["estado"] = "completado"
+            t["completado_en"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            save_tareas(ts)
+            log_bitacora("cli","completar_recordatorio","tarea",t["id"],"",t,"")
+            print(f"OK · {t['id']} marcado COMPLETADO")
+            return 0
+    print("No se pudo completar (id inexistente o ya no está pendiente).")
+    return 1
+
+def cmd_cancelar_recordatorio(args):
+    ts = load_tareas()
+    for t in ts:
+        if t["id"] == args.id and t["estado"] in ("pendiente","completado"):
+            t["estado"] = "cancelado"
+            t["cancelado_motivo"] = args.motivo or ""
+            save_tareas(ts)
+            log_bitacora("cli","cancelar_recordatorio","tarea",t["id"],"",t,args.motivo or "")
+            print(f"OK · {t['id']} CANCELADO · motivo: {t['cancelado_motivo']}")
+            return 0
+    print("No se pudo cancelar (id inexistente).")
+    return 1
 
 
 def night_rules_for(date_obj, ventanas):
@@ -1066,6 +1220,33 @@ def main():
     dbg.add_argument("--amenidad")
     dbg.set_defaults(func=cmd_debug_disponibilidad)
 
+    # agendar_recordatorio
+    ar = sub.add_parser("agendar_recordatorio")
+    ar.add_argument("--titulo", required=True)
+    ar.add_argument("--cuando")            # "YYYY-MM-DD HH:MM"
+    ar.add_argument("--diario")            # "HH:MM"
+    ar.add_argument("--semanal")           # "LU,MI,VI"
+    ar.add_argument("--hora")              # "HH:MM" (para semanal)
+    ar.add_argument("--nota")
+    ar.set_defaults(func=cmd_agendar_recordatorio)
+
+    # listar_recordatorios
+    lr = sub.add_parser("listar_recordatorios")
+    lr.add_argument("--estado")  # pendiente|completado|cancelado
+    lr.add_argument("--hoy", action="store_true")
+    lr.add_argument("--tipo", choices=["GENERAL", "LIMPIEZA"])
+    lr.set_defaults(func=cmd_listar_recordatorios)
+
+    # completar_recordatorio
+    cr = sub.add_parser("completar_recordatorio")
+    cr.add_argument("--id", required=True)
+    cr.set_defaults(func=cmd_completar_recordatorio)
+
+    # cancelar_recordatorio
+    xr = sub.add_parser("cancelar_recordatorio")
+    xr.add_argument("--id", required=True)
+    xr.add_argument("--motivo")
+    xr.set_defaults(func=cmd_cancelar_recordatorio)
 
     args = ap.parse_args()
     if not hasattr(args, "func"):
