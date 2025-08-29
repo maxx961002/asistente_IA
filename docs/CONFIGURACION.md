@@ -188,6 +188,12 @@ OVERFLOW_REGLAS:
     limite_porcentaje_mes: sin_limite
     nota_confirmacion: "Upgrade cortesía a loft mayor, facturado como 2 personas."
 
+    UNIDADES_NOMBRES_UNICOS: ON
+UNIDADES_ALIAS:
+  "Depto A": ["Departamento A","Dpto A","dep a","depa a"]
+  "Cabaña G": ["Cab G","cabana g","cab g"]
+  "Loft 5": ["Loft-5","loft5"]
+
 
 # DISPONIBILIDAD
 AVAIL_PRIORIDAD: min_unidades          # o min_costo
@@ -236,15 +242,34 @@ TARIFAS ALOJAMIENTO (por tipo + personas):
     3 pax → $92.000 por noche (normal)    
     3 pax → $120.000 por noche (especial) 
 
-VENTANAS (desde–hasta + regla: precio especial o % descuento):
-  # Ejemplos (ajustar a tus fechas)
-  # 01/01–31/01 → precio especial
-  # 01/07–31/07 → precio especial
-  # 28/03–31/03 (Semana Santa) → precio especial
-  # Feriados largos → 15% descuento
+# VENTANAS (desde–hasta + regla: precio especial o % descuento):
+  VENTANAS (desde–hasta + regla):
+  - desde: 2025-01-01
+    hasta: 2025-01-31
+    regla: precio_especial
 
-DESCUENTOS (si aplica):
-  # Ej.: 7 noches o más → 10% descuento
+  - desde: 2025-07-01
+    hasta: 2025-07-31
+    regla: precio_especial
+
+  - desde: 2025-03-28
+    hasta: 2025-03-31
+    etiqueta: "Semana Santa"
+    regla: precio_especial
+
+  # Feriados / fines largos (cargá los que correspondan cada año)
+  # ejemplo:
+  - desde: 2025-06-20
+    hasta: 2025-06-22
+    etiqueta: "Finde largo junio"
+    regla: descuento_pct
+    valor: 15
+hes o más → 10% descuento
+
+ DESCUENTOS:
+  - condicion: noches_minimas
+    noches: 7
+    descuento_pct: 10
 
 
 # SERVICIOS (SLOTS GENÉRICOS)
